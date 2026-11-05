@@ -1,0 +1,10 @@
+{
+  "name": "Saravanaa Bhavan Staff Clock",
+  "short_name": "SB Staff Clock",
+  "description": "Sign in, breaks and sign out for Saravanaa Bhavan staff.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fbfaf6",
+  "theme_color": "#a61c2b",
+  "icons": [{"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
