@@ -52,11 +52,6 @@ function showAdminLogin(message = "", isError = false) {
   adminLoginView.classList.remove("hidden");
   $("#admin-open").classList.add("hidden");
   $("#admin-sign-out").classList.add("hidden");
-  $("#admin-otp-label").classList.add("hidden");
-  $("#admin-otp").classList.add("hidden");
-  $("#admin-verify-submit").classList.add("hidden");
-  $("#admin-resend-code").classList.add("hidden");
-  $("#admin-login-submit").classList.remove("hidden");
   $("#admin-login-submit").disabled = false;
   showMessage(adminLoginMessage, message, isError);
 }
@@ -188,58 +183,21 @@ async function authorizeAdmin(user) {
   return true;
 }
 
-async function requestAdminCode() {
-  if (!supabase) {
-    showMessage(adminLoginMessage, "Supabase is not connected. Keep the existing config.js with its project URL and publishable key.", true);
-    return;
-  }
-  const email = $("#admin-email").value.trim().toLowerCase();
-  const button = $("#admin-login-submit");
-  button.disabled = true;
-  button.textContent = "Sending code…";
-  showMessage(adminLoginMessage, "");
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false }
-  });
-  button.disabled = false;
-  button.textContent = "Send verification code";
-  if (error) {
-    showMessage(adminLoginMessage, error.message, true);
-    return;
-  }
-  $("#admin-otp-label").classList.remove("hidden");
-  $("#admin-otp").classList.remove("hidden");
-  $("#admin-verify-submit").classList.remove("hidden");
-  $("#admin-resend-code").classList.remove("hidden");
-  button.classList.add("hidden");
-  $("#admin-otp").focus();
-  showMessage(adminLoginMessage, `A verification code was requested for ${email}. Check inbox and spam.`);
-}
-
 async function adminLogin(event) {
   event.preventDefault();
-  if (!$("#admin-otp").classList.contains("hidden")) return verifyAdminCode();
-  return requestAdminCode();
-}
-
-async function verifyAdminCode() {
   if (!supabase) {
     showMessage(adminLoginMessage, "Supabase is not connected. Keep the existing config.js with its project URL and publishable key.", true);
     return;
   }
-  const token = $("#admin-otp").value.trim();
-  if (!/^\d{6}$/.test(token)) {
-    showMessage(adminLoginMessage, "Enter the six-digit code from the email.", true);
-    return;
-  }
-  const button = $("#admin-verify-submit");
-  button.disabled = true;
-  button.textContent = "Verifying…";
   const email = $("#admin-email").value.trim().toLowerCase();
-  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  const password = $("#admin-password").value;
+  const button = $("#admin-login-submit");
+  button.disabled = true;
+  button.textContent = "Signing in…";
+  showMessage(adminLoginMessage, "");
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   button.disabled = false;
-  button.textContent = "Verify code and sign in";
+  button.textContent = "Sign in as admin";
   if (error) {
     showMessage(adminLoginMessage, error.message, true);
     return;
@@ -397,8 +355,6 @@ function updateClock() {
 $("#admin-open").addEventListener("click", () => showAdminLogin());
 $("#admin-cancel").addEventListener("click", () => showPublic());
 $("#admin-login-form").addEventListener("submit", adminLogin);
-$("#admin-verify-submit").addEventListener("click", verifyAdminCode);
-$("#admin-resend-code").addEventListener("click", requestAdminCode);
 $("#admin-sign-out").addEventListener("click", adminSignOut);
 $("#staff-list").addEventListener("click", recordAction);
 $("#search").addEventListener("input", renderStaff);
