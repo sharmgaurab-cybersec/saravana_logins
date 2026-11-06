@@ -1,45 +1,43 @@
 # Saravanaa Bhavan Staff Clock
 
-A mobile-friendly web app for staff phone verification, shift sign-in, breaks, sign-out, and administrator-managed staff records. The starter uses Supabase Auth and Postgres so staff and managers share the same live data from different phones.
+A mobile-friendly staff clock for email one-time-code sign-in, shift sign-in, breaks, sign-out, and administrator-managed staff records. Supabase Auth and Postgres let staff and managers use shared data from different devices.
 
 ## Included
 
 - Saravanaa Bhavan branding and responsive mobile layout.
-- SMS one-time-code sign-in for staff and administrators.
+- Email OTP verification for staff and administrators.
 - A–Z employee directory with search.
 - Staff can record their own sign-in, break start/end, and sign-out.
-- Administrators can add staff with a verified phone number and deactivate staff. Deactivation keeps historical shift events.
-- Supabase SQL setup with row-level security and server-checked clock actions.
+- Admins can add employees by name, role, and email, or assign an email to an existing staff member.
+- Supabase SQL setup and an upgrade script for an existing phone-auth database.
 - GitHub Pages-compatible static files. No build step is required.
 
-## 1. Create and configure Supabase
+## Important: preserve your existing Supabase connection
 
-1. Create a Supabase project.
-2. In **Authentication → Providers**, enable **Phone** and configure an SMS provider (for example Twilio). Supabase phone OTP requires an SMS provider; the provider may charge for messages.
-3. In **Project Settings → API**, copy the Project URL and the **publishable** key.
-4. Open **SQL Editor**, paste all of `supabase/setup.sql`, and run it once. The SQL creates the tables, access policies, phone-to-staff linking, and protected clock/admin functions.
-5. In the Data API settings, make sure the `public` schema is available to the API. The setup SQL grants only the required `authenticated` permissions; row-level security still controls access.
+This update bundle intentionally **does not include `config.js`**. Keep the `config.js` already in your GitHub repository; it contains your Supabase Project URL and publishable key. When uploading the update, do not delete or replace that file.
 
-The app uses the `@supabase/supabase-js` browser module from a pinned CDN version. It never needs a service-role or secret key in the browser.
+## Configure email OTP in Supabase
 
-## 2. Connect the website
+1. In the same Supabase project already connected to the app, open **Authentication → Sign In / Providers → Email** and enable email sign-in. Keep email confirmation enabled.
+2. In **Authentication → Email Templates**, set the **Confirm signup** and **Magic Link** templates to show the one-time code using `{{ .Token }}`. The app expects a six-digit code, not a clickable link.
+3. Supabase's built-in email service has sending limits and may only deliver to project team addresses. If staff emails cannot receive a code, configure a custom SMTP provider in Supabase Auth.
 
-Edit `config.js` and replace the two placeholders:
+## Database setup
 
-```js
-window.APP_CONFIG = {
-  SUPABASE_URL: "https://YOUR_PROJECT_REF.supabase.co",
-  SUPABASE_PUBLISHABLE_KEY: "sb_publishable_..."
-};
-```
+Choose **one** path:
 
-The publishable key is designed to be visible in a browser. **Never paste a Supabase secret or service-role key into `config.js`, GitHub, or the website.** Security depends on the supplied row-level policies and database functions.
+- **New database:** run `supabase/setup.sql` once in **SQL Editor**. It creates the email mapping, access policies, and protected clock/admin functions.
+- **You already ran the old phone setup:** run `supabase/migrate_phone_to_email.sql` once in **SQL Editor**. It preserves the existing staff and clock history. Phone numbers are not converted to emails automatically.
 
-## 3. Create the first administrator
+For an existing database, after the migration log in with the manager's email and OTP. Then use **Set employee email** in the admin panel to assign emails to existing staff. The former phone-auth admin account is a different Supabase user; promote the new email-auth account as an administrator using the next section.
 
-1. Open the app and sign in once using the manager’s mobile number in international format, such as `+61412345678`. Enter the SMS code. Until promoted, the new account will show that staff access is pending.
-2. In Supabase **Authentication → Users**, copy that user’s UUID.
-3. In **SQL Editor**, run the statement below after replacing the placeholder with that UUID:
+In **Project Settings → API → Data API settings**, ensure the `public` schema is available to the API. The SQL grants the required authenticated access and enables row-level security.
+
+## Promote the first email administrator
+
+1. Open the updated app and sign in once using the manager's email. Enter the code from the email. If the account is new, it may show that access is pending.
+2. In Supabase **Authentication → Users**, copy the email user's UUID.
+3. In **SQL Editor**, run this after replacing the placeholder:
 
 ```sql
 insert into public.user_profiles (user_id, role)
@@ -47,30 +45,25 @@ values ('YOUR_AUTH_USER_UUID'::uuid, 'admin')
 on conflict (user_id) do update set role = 'admin';
 ```
 
-4. Refresh the app. Admins can add employees by name, role, and phone number. Use international format for each number. Staff then sign in with the same phone and a fresh SMS verification code.
+4. Refresh the app. Add employees with their email addresses, or use **Set employee email** to link existing roster entries. Staff sign in using the exact email the admin assigned.
 
-Only administrator accounts can add or remove people. Removing a person deactivates their staff record and keeps earlier clock events for reporting.
+Only administrators can add or deactivate staff. Deactivation preserves historical clock events.
 
-## 4. Upload to GitHub and publish
+## Upload and publish the update
 
-1. Create a new GitHub repository.
-2. Upload the contents of this folder to the repository root, including `index.html`, `config.js`, `src/`, `assets/`, `styles.css`, `manifest.webmanifest`, and `supabase/`.
-3. In GitHub, open **Settings → Pages** and publish from the `main` branch and `/ (root)`.
-4. In Supabase **Authentication → URL Configuration**, set the published GitHub Pages URL as the Site URL and add it to the allowed redirect URLs. For a repository site, the URL will look like `https://YOUR_GITHUB_NAME.github.io/YOUR_REPOSITORY/`.
-5. Open the published app over HTTPS. On mobile, use **Add to Home Screen** (iPhone Safari) or **Install app** (Android Chrome) for an app-like icon and full-screen view.
+1. Extract this ZIP.
+2. Upload and replace the files from the ZIP in your existing GitHub repository. Keep the repository's current `config.js` untouched.
+3. If you use GitHub Pages, wait for its deployment to finish. Keep the existing Supabase project and URL Configuration settings.
+4. Open the published site and test email OTP with an address that can receive mail.
 
-## Important setup notes
-
-- Phone OTP cannot send until a working SMS provider is configured in Supabase Auth.
-- Employees must be added by an administrator before they can record shifts. Unlisted phone accounts cannot read the staff directory or write shift events.
-- The app uses one shared Supabase project. Do not switch the GitHub Pages site to public with a different database or remove the RLS policies.
-- The browser contains only the Supabase URL and publishable key. Privileged operations are checked by database functions and RLS; no admin code or employee PIN is embedded in the client.
-- This starter records shift events and current status. It does not calculate award rates, overtime, paid breaks, or payroll. Review local workplace requirements before relying on it for payroll.
-- The website is ready to wrap in a native iOS/Android shell later (for example with Capacitor); the included PWA manifest supports home-screen installation now.
+The app uses a pinned Supabase JavaScript client from a CDN. The browser contains only the project's URL and publishable key; never add a Supabase secret/service-role key to the repository.
 
 ## Troubleshooting
 
-- **No SMS arrives:** confirm Phone Auth is enabled, the SMS provider is verified/configured, and the number is in E.164 format (starts with `+` and country code).
-- **A new employee sees “access pending”:** confirm the administrator added the same phone number to the roster, then sign out and request a fresh OTP.
-- **No staff appears after setup:** confirm `supabase/setup.sql` completed, `config.js` has the correct project values, and the `public` schema is exposed to the Data API.
-- **Admin controls are missing:** verify that the correct `user_profiles.user_id` was promoted to `admin`, then sign out and sign in again.
+- **Code email doesn't arrive:** check spam/junk, the Supabase Auth logs, email templates, and whether the project's built-in email service permits that recipient. Configure SMTP if required.
+- **“Access pending”:** make sure the admin added or assigned that same email to the employee. Then sign out and sign in again.
+- **Email user is not an admin:** promote the new email-auth user's UUID in `user_profiles`; the old phone-auth user has a different UUID.
+- **Staff or history is missing:** confirm the migration completed, `config.js` still contains the original project values, and the GitHub Pages site is connected to the same Supabase project.
+- **Admin controls are missing:** verify the signed-in user's `user_profiles.role` is `admin`, then sign out and back in.
+
+The app records clock events and current status. It does not calculate award rates, overtime, paid breaks, or payroll. It can later be wrapped in a native iOS/Android shell; the PWA manifest supports home-screen installation now.
