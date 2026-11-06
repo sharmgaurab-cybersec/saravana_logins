@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#a61c2b">
-  <meta name="description" content="Saravanaa Bhavan staff sign-in, breaks and sign-out.">
+  <meta name="description" content="Saravanaa Bhavan staff clock and admin attendance report.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
@@ -17,72 +17,75 @@
         <img class="brand-logo" src="./assets/brand-logo.jpg" alt="Saravanaa Bhavan logo">
         <span><strong>SARAVANAA BHAVAN</strong><small>TEAM CLOCK</small></span>
       </a>
-      <button class="button button-quiet hidden" id="sign-out" type="button">Sign out</button>
+      <div class="topbar-actions">
+        <button class="button button-quiet" id="admin-open" type="button">Admin login</button>
+        <button class="button button-quiet hidden" id="admin-sign-out" type="button">Admin sign out</button>
+      </div>
     </header>
 
-    <section class="login-card" id="login-view" aria-labelledby="login-title">
-      <div class="eyebrow">STAFF PORTAL</div>
-      <h1 id="login-title">Welcome to your shift</h1>
-      <p class="muted">Sign in with your registered email. We’ll send a one-time verification code to your inbox.</p>
-      <form id="email-form" class="form-stack">
-        <label for="email">Email address</label>
-        <input id="email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" required>
-        <button class="button button-primary" id="send-code" type="submit">Send verification code</button>
-      </form>
-      <form id="otp-form" class="form-stack hidden">
-        <label for="otp">6-digit code</label>
-        <input id="otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required>
-        <button class="button button-primary" type="submit">Verify and sign in</button>
-        <button class="text-button" id="change-email" type="button">Use a different email</button>
-      </form>
-      <div class="message" id="login-message" role="status" aria-live="polite"></div>
-      <p class="login-footnote">Your email must be added by a restaurant administrator before you can use the clock.</p>
+    <section class="public-clock" id="public-view" aria-labelledby="clock-title">
+      <div class="clock-heading">
+        <div class="eyebrow">STAFF PORTAL</div>
+        <h1 id="clock-title">Welcome to your shift</h1>
+        <p class="muted">Find your name, then choose the clock action.</p>
+      </div>
+      <div class="toolbar">
+        <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search employee name" aria-label="Search employee name"></label>
+      </div>
+      <div class="staff-list public-staff-list" id="staff-list" aria-live="polite"></div>
+      <div class="message" id="public-message" role="status" aria-live="polite"></div>
     </section>
 
-    <section class="dashboard hidden" id="dashboard-view" aria-live="polite">
+    <section class="login-card admin-login hidden" id="admin-login-view" aria-labelledby="admin-login-title">
+      <div class="eyebrow">ADMIN ONLY</div>
+      <h1 id="admin-login-title">Administrator login</h1>
+      <p class="muted">Sign in to view staff attendance and manage the roster.</p>
+      <form id="admin-login-form" class="form-stack">
+        <label for="admin-email">Email address</label>
+        <input id="admin-email" name="email" type="email" autocomplete="username" required>
+        <label for="admin-password">Password</label>
+        <input id="admin-password" name="password" type="password" autocomplete="current-password" required>
+        <button class="button button-primary" id="admin-login-submit" type="submit">Sign in as admin</button>
+        <button class="text-button" id="admin-cancel" type="button">Back to staff clock</button>
+      </form>
+      <div class="message" id="admin-login-message" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="admin-dashboard hidden" id="admin-view" aria-labelledby="admin-title">
       <div class="welcome-row">
-        <div><div class="eyebrow">SARAVANAA BHAVAN · STAFF CLOCK</div><h1 id="greeting">Your shift</h1><p class="muted" id="account-label"></p></div>
+        <div><div class="eyebrow">SARAVANAA BHAVAN · ADMIN</div><h1 id="admin-title">Daily attendance</h1><p class="muted">Staff clock activity is visible only to the signed-in administrator.</p></div>
         <div class="time-block"><strong id="time-now">--:--</strong><span id="date-now"></span></div>
       </div>
-      <div class="summary-grid">
-        <article class="summary-card"><span>On the clock</span><strong id="working-count">0</strong></article>
-        <article class="summary-card"><span>On a break</span><strong id="break-count">0</strong></article>
-        <article class="summary-card"><span>Team members</span><strong id="team-count">0</strong></article>
-      </div>
 
-      <section class="panel">
-        <div class="panel-heading">
-          <div><h2>Team</h2><p class="muted" id="team-caption">Loading staff…</p></div>
-          <button class="button button-quiet" id="refresh" type="button" title="Refresh team">Refresh</button>
+      <section class="panel report-panel">
+        <div class="panel-heading"><div><h2>Attendance report</h2><p class="muted">Times are shown in Sydney time. Breaks are excluded from hours worked.</p></div></div>
+        <div class="report-controls">
+          <label for="report-date">Work date</label>
+          <input id="report-date" type="date">
+          <button class="button button-primary" id="load-report" type="button">Load day</button>
         </div>
-        <div class="toolbar">
-          <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search employee name" aria-label="Search employee name"></label>
+        <div class="report-table-wrap">
+          <table class="report-table">
+            <thead><tr><th>Employee</th><th>Sign in</th><th>Break start(s)</th><th>Break end(s)</th><th>Sign out</th><th>Hours worked</th></tr></thead>
+            <tbody id="report-body"><tr><td colspan="6" class="report-empty">Choose a date and load the report.</td></tr></tbody>
+          </table>
         </div>
-        <div class="staff-list" id="staff-list"></div>
+        <div class="notice" id="report-message" role="status" aria-live="polite"></div>
       </section>
 
-      <section class="panel admin-panel hidden" id="admin-panel">
-        <div class="panel-heading"><div><h2>Admin · Staff management</h2><p class="muted">Only verified administrator accounts can add or remove staff.</p></div></div>
+      <section class="panel admin-panel" id="staff-admin-panel">
+        <div class="panel-heading"><div><h2>Manage staff</h2><p class="muted">Add people to the clock or deactivate a staff profile.</p></div></div>
         <form id="add-staff-form" class="admin-form">
           <label>Name<input name="name" autocomplete="name" maxlength="80" placeholder="Employee name" required></label>
           <label>Role<input name="role" maxlength="60" placeholder="e.g. Floor staff"></label>
-          <label>Work email<input name="email" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" required></label>
           <button class="button button-primary" type="submit">Add employee</button>
         </form>
-        <form id="link-staff-form" class="admin-form link-staff-form">
-          <label>Existing employee<select name="staff_id" id="existing-staff-select" required><option value="">Select an employee</option></select></label>
-          <label>Work email<input name="email" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" required></label>
-          <button class="button button-quiet" type="submit">Set employee email</button>
-        </form>
+        <div class="admin-staff-list" id="admin-staff-list"></div>
       </section>
-
-      <section class="panel history-panel">
-        <div class="panel-heading"><div><h2>Recent activity</h2><p class="muted">Latest clock events</p></div></div>
-        <div id="activity-list" class="activity-list"></div>
-      </section>
-      <div class="notice" id="app-message" role="status" aria-live="polite"></div>
+      <div class="notice" id="admin-message" role="status" aria-live="polite"></div>
     </section>
-    <footer>Staff activity is protected by Supabase authentication and database policies.</footer>
+
+    <footer>Staff can record clock actions on this shared page. Only the administrator can view attendance reports.</footer>
   </main>
   <script src="./config.js"></script>
   <script type="module" src="./src/app.js"></script>

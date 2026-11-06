@@ -4,20 +4,18 @@ const config = window.APP_CONFIG || {};
 const configured = config.SUPABASE_URL?.startsWith("https://") &&
   config.SUPABASE_PUBLISHABLE_KEY &&
   !config.SUPABASE_PUBLISHABLE_KEY.includes("YOUR_");
-
 const $ = (selector) => document.querySelector(selector);
-const loginView = $("#login-view");
-const dashboardView = $("#dashboard-view");
-const emailForm = $("#email-form");
-const otpForm = $("#otp-form");
-const loginMessage = $("#login-message");
-const appMessage = $("#app-message");
+
+const publicView = $("#public-view");
+const adminLoginView = $("#admin-login-view");
+const adminView = $("#admin-view");
+const publicMessage = $("#public-message");
+const adminLoginMessage = $("#admin-login-message");
+const adminMessage = $("#admin-message");
+const reportMessage = $("#report-message");
 let supabase;
-let currentUser;
-let profile;
 let staff = [];
-let activity = [];
-let clockTimer;
+let reportRows = [];
 
 if (configured) {
   supabase = createClient(config.SUPABASE_URL, config.SUPABASE_PUBLISHABLE_KEY, {
@@ -25,8 +23,8 @@ if (configured) {
   });
   start();
 } else {
-  loginMessage.textContent = "Connect this project to Supabase first: add your project URL and publishable key in config.js.";
-  $("#send-code").disabled = true;
+  showMessage(publicMessage, "Supabase is not connected. Keep your existing config.js with its project URL and publishable key.", true);
+  $("#admin-open").disabled = true;
 }
 
 function showMessage(target, message, isError = false) {
@@ -40,171 +38,94 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function cleanEmail(email) {
-  return email.trim().toLowerCase();
+function showPublic(message = "", isError = false) {
+  publicView.classList.remove("hidden");
+  adminLoginView.classList.add("hidden");
+  adminView.classList.add("hidden");
+  $("#admin-open").classList.remove("hidden");
+  $("#admin-sign-out").classList.add("hidden");
+  showMessage(publicMessage, message, isError);
+}
+
+function showAdminLogin(message = "", isError = false) {
+  publicView.classList.add("hidden");
+  adminView.classList.add("hidden");
+  adminLoginView.classList.remove("hidden");
+  $("#admin-open").classList.add("hidden");
+  $("#admin-sign-out").classList.add("hidden");
+  showMessage(adminLoginMessage, message, isError);
+}
+
+function showAdmin() {
+  publicView.classList.add("hidden");
+  adminLoginView.classList.add("hidden");
+  adminView.classList.remove("hidden");
+  $("#admin-open").classList.add("hidden");
+  $("#admin-sign-out").classList.remove("hidden");
+  showMessage(adminLoginMessage, "");
 }
 
 async function start() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) await loadDashboard(session.user);
-  supabase.auth.onAuthStateChange((_event, sessionNow) => {
-    setTimeout(() => {
-      if (sessionNow) loadDashboard(sessionNow.user);
-      else showLogin();
+  $("#report-date").value = sydneyDate();
+  updateClock();
+  setInterval(updateClock, 30_000);
+  supabase.auth.onAuthStateChange((_event, session) => {
+    setTimeout(async () => {
+      if (session?.user) await authorizeAdmin(session.user);
+      else showPublic();
     }, 0);
   });
-  updateClock();
-  clockTimer = setInterval(updateClock, 30_000);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) await authorizeAdmin(session.user);
+  else showPublic();
+  await loadStaff();
 }
 
-async function requestOtp(event) {
-  event.preventDefault();
-  const email = cleanEmail($("#email").value);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    showMessage(loginMessage, "Enter a valid email address.", true);
-    return;
-  }
-  const button = $("#send-code");
-  button.disabled = true;
-  button.textContent = "Sending…";
-  showMessage(loginMessage, "");
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: true }
-  });
-  button.disabled = false;
-  button.textContent = "Send verification code";
+function sydneyDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const part = (type) => parts.find((item) => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+async function loadStaff() {
+  const { data, error } = await supabase
+    .from("staff_members")
+    .select("id,name,role,is_active")
+    .eq("is_active", true)
+    .order("name", { ascending: true });
   if (error) {
-    showMessage(loginMessage, error.message, true);
+    showMessage(publicMessage, `Could not load the staff list: ${error.message}`, true);
     return;
   }
-  emailForm.classList.add("hidden");
-  otpForm.classList.remove("hidden");
-  showMessage(loginMessage, `A verification code was emailed to ${email}. Check your inbox and spam folder.`);
-  $("#otp").focus();
-}
-
-async function verifyOtp(event) {
-  event.preventDefault();
-  const email = cleanEmail($("#email").value);
-  const token = $("#otp").value.trim();
-  if (!/^\d{6}$/.test(token)) {
-    showMessage(loginMessage, "Enter the 6-digit code from your email.", true);
-    return;
-  }
-  const button = otpForm.querySelector("button[type=submit]");
-  button.disabled = true;
-  button.textContent = "Verifying…";
-  const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-  button.disabled = false;
-  button.textContent = "Verify and sign in";
-  if (error) showMessage(loginMessage, error.message, true);
-}
-
-async function loadDashboard(user) {
-  currentUser = user;
-  const { data: row, error } = await supabase
-    .from("user_profiles")
-    .select("role, staff_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (error) {
-    showMessage(loginMessage, `Could not load account profile: ${error.message}`, true);
-    return;
-  }
-  if (!row || !["admin", "employee"].includes(row.role)) {
-    showMessage(loginMessage, "This account does not have staff-clock access. Ask an administrator.", true);
-    loginView.classList.remove("hidden");
-    dashboardView.classList.add("hidden");
-    $("#sign-out").classList.remove("hidden");
-    return;
-  }
-  if (row.role === "employee" && !row.staff_id) {
-    loginView.classList.add("hidden");
-    dashboardView.classList.remove("hidden");
-    $("#sign-out").classList.remove("hidden");
-    $("#greeting").textContent = "Staff access pending";
-    $("#account-label").textContent = user.email || "Verified email account";
-    $("#admin-panel").classList.add("hidden");
-    $(".summary-grid").classList.add("hidden");
-    $(".panel").classList.add("hidden");
-    showMessage(appMessage, "Your email is verified, but it is not linked to an active staff member. Ask the manager to add this email, then sign in again.", true);
-    profile = row;
-    return;
-  }
-  profile = row;
-  loginView.classList.add("hidden");
-  dashboardView.classList.remove("hidden");
-  $("#sign-out").classList.remove("hidden");
-  $("#admin-panel").classList.toggle("hidden", row.role !== "admin");
-  $(".summary-grid").classList.remove("hidden");
-  $(".panel").forEach?.(() => {});
-  document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("hidden"));
-  $("#greeting").textContent = row.role === "admin" ? "Admin dashboard" : "Your shift";
-  $("#account-label").textContent = user.email || "Verified email account";
-  showMessage(appMessage, "");
-  await loadData();
-}
-
-async function loadData() {
-  const [staffResult, activityResult] = await Promise.all([
-    supabase.from("staff_members")
-      .select("id,name,role,clock_status,status_changed_at,is_active")
-      .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase.from("shift_events")
-      .select("id,staff_name,action,created_at")
-      .order("created_at", { ascending: false })
-      .limit(25)
-  ]);
-  if (staffResult.error) {
-    showMessage(appMessage, `Could not load staff: ${staffResult.error.message}`, true);
-    return;
-  }
-  staff = staffResult.data || [];
-  activity = activityResult.data || [];
-  if (activityResult.error) showMessage(appMessage, `Staff loaded; activity could not load: ${activityResult.error.message}`, true);
+  staff = data || [];
   renderStaff();
-  renderActivity();
+  renderAdminStaff();
 }
 
 function renderStaff() {
   const query = $("#search").value.trim().toLocaleLowerCase();
   const visible = staff.filter((person) => person.name.toLocaleLowerCase().includes(query));
   const list = $("#staff-list");
-  $("#team-count").textContent = String(staff.length);
-  $("#working-count").textContent = String(staff.filter((person) => person.clock_status === "working").length);
-  $("#break-count").textContent = String(staff.filter((person) => person.clock_status === "break").length);
-  $("#team-caption").textContent = profile?.role === "admin"
-    ? `${staff.length} active team member${staff.length === 1 ? "" : "s"}`
-    : "Only your verified account can record your shift";
   if (!visible.length) {
-    list.innerHTML = `<div class="empty-row">${staff.length ? "No names match your search." : "No active staff members yet. Ask an administrator to add the team."}</div>`;
+    list.innerHTML = `<div class="empty-row">${staff.length ? "No names match your search." : "No active staff members yet. Ask the administrator to add the team."}</div>`;
     return;
   }
-  const staffSelect = $("#existing-staff-select");
-  if (staffSelect) {
-    const selectedId = staffSelect.value;
-    staffSelect.innerHTML = '<option value="">Select an employee</option>' + staff
-      .map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`)
-      .join("");
-    if (staff.some((person) => person.id === selectedId)) staffSelect.value = selectedId;
-  }
-  list.innerHTML = visible.map((person) => {
-    const status = person.clock_status || "off";
-    const statusLabel = status === "working" ? "On the clock" : status === "break" ? "On a break" : "Signed out";
-    const isSelf = person.id === profile?.staff_id;
-    const actions = [];
-    if (isSelf && status === "off") actions.push(actionButton("in", "Sign in", "primary"));
-    if (isSelf && status === "working") actions.push(actionButton("break_start", "Start break", "warm"), actionButton("out", "Sign out", "remove"));
-    if (isSelf && status === "break") actions.push(actionButton("break_end", "End break", "primary"), actionButton("out", "Sign out", "remove"));
-    if (profile?.role === "admin") actions.push(actionButton("remove", "Remove", "remove"));
-    return `<article class="staff-row">
-      <div class="person"><div class="avatar" aria-hidden="true">${escapeHtml(initials(person.name))}</div><div><div class="person-name">${escapeHtml(person.name)}</div><div class="person-role">${escapeHtml(person.role || "Team member")}${isSelf ? " · You" : ""}</div></div></div>
-      <div class="status ${status === "working" ? "working" : status}"><span class="dot"></span>${statusLabel}</div>
-      <div class="actions">${actions.join("")}</div>
-    </article>`;
-  }).join("");
+  list.innerHTML = visible.map((person) => `
+    <article class="staff-row public-staff-row" data-staff-id="${escapeHtml(person.id)}">
+      <div class="person">
+        <div class="avatar" aria-hidden="true">${escapeHtml(initials(person.name))}</div>
+        <div><div class="person-name">${escapeHtml(person.name)}</div><div class="person-role">${escapeHtml(person.role || "Team member")}</div></div>
+      </div>
+      <div class="clock-actions">
+        ${actionButton("sign_in", "Sign in", "primary")}
+        ${actionButton("break_start", "Start break", "warm")}
+        ${actionButton("break_end", "End break", "quiet")}
+        ${actionButton("sign_out", "Sign out", "remove")}
+      </div>
+    </article>`).join("");
 }
 
 function actionButton(action, label, style) {
@@ -215,37 +136,115 @@ function initials(name) {
   return String(name || "?").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
-function renderActivity() {
-  const root = $("#activity-list");
-  if (!activity.length) {
-    root.innerHTML = '<div class="activity-empty">No clock activity recorded yet.</div>';
-    return;
-  }
-  root.innerHTML = activity.map((event) => `<div class="activity-row"><span><strong>${escapeHtml(event.staff_name)}</strong> ${escapeHtml(actionLabel(event.action))}</span><time datetime="${escapeHtml(event.created_at)}">${escapeHtml(formatDateTime(event.created_at))}</time></div>`).join("");
-}
-
 function actionLabel(action) {
   return ({ sign_in: "signed in", break_start: "started a break", break_end: "ended a break", sign_out: "signed out" })[action] || action;
 }
 
-function formatDateTime(value) {
-  return new Intl.DateTimeFormat("en-AU", { weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(value));
-}
-
-function updateClock() {
-  const now = new Date();
-  $("#time-now").textContent = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" }).format(now);
-  $("#date-now").textContent = new Intl.DateTimeFormat("en-AU", { weekday: "long", month: "long", day: "numeric" }).format(now);
-}
-
-async function doClockAction(action) {
-  const { error } = await supabase.rpc("record_shift_action", { p_action: action });
+async function recordAction(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const row = button.closest("[data-staff-id]");
+  const staffId = row?.dataset.staffId;
+  const person = staff.find((item) => item.id === staffId);
+  if (!person) return;
+  row.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+  const { error } = await supabase.rpc("record_staff_clock_action", {
+    p_staff_id: staffId,
+    p_action: button.dataset.action
+  });
+  row.querySelectorAll("button").forEach((item) => { item.disabled = false; });
   if (error) {
-    showMessage(appMessage, error.message, true);
+    showMessage(publicMessage, "That clock action could not be recorded. Check the current shift with the administrator.", true);
     return;
   }
-  showMessage(appMessage, `Shift updated: ${actionLabel(action)}.`);
-  await loadData();
+  showMessage(publicMessage, `${person.name}: ${actionLabel(button.dataset.action)} recorded.`);
+}
+
+async function authorizeAdmin(user) {
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error || data?.role !== "admin") {
+    await supabase.auth.signOut();
+    showAdminLogin("This account is not authorized as the administrator.", true);
+    return false;
+  }
+  showAdmin();
+  await loadStaff();
+  await loadReport();
+  return true;
+}
+
+async function adminLogin(event) {
+  event.preventDefault();
+  const email = $("#admin-email").value.trim().toLowerCase();
+  const password = $("#admin-password").value;
+  const button = $("#admin-login-submit");
+  button.disabled = true;
+  button.textContent = "Signing in…";
+  showMessage(adminLoginMessage, "");
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  button.disabled = false;
+  button.textContent = "Sign in as admin";
+  if (error) {
+    showMessage(adminLoginMessage, error.message, true);
+    return;
+  }
+  await authorizeAdmin(data.user);
+}
+
+async function loadReport() {
+  const day = $("#report-date").value;
+  if (!day) {
+    showMessage(reportMessage, "Choose a work date.", true);
+    return;
+  }
+  const button = $("#load-report");
+  button.disabled = true;
+  button.textContent = "Loading…";
+  const { data, error } = await supabase.rpc("admin_daily_attendance", { p_day: day });
+  button.disabled = false;
+  button.textContent = "Load day";
+  if (error) {
+    showMessage(reportMessage, `Could not load the report: ${error.message}`, true);
+    return;
+  }
+  reportRows = data || [];
+  renderReport();
+  showMessage(reportMessage, `${reportRows.length} staff row${reportRows.length === 1 ? "" : "s"} for ${day}.`);
+}
+
+function renderReport() {
+  const body = $("#report-body");
+  if (!reportRows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="report-empty">No staff or clock actions found for this date.</td></tr>';
+    return;
+  }
+  body.innerHTML = reportRows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.staff_name)}</td>
+      <td>${escapeHtml(row.sign_in_times || "—")}</td>
+      <td>${escapeHtml(row.break_start_times || "—")}</td>
+      <td>${escapeHtml(row.break_end_times || "—")}</td>
+      <td>${escapeHtml(row.sign_out_times || "—")}</td>
+      <td class="hours-cell">${Number(row.hours_worked || 0).toFixed(2)} hrs</td>
+    </tr>`).join("");
+}
+
+function renderAdminStaff() {
+  const list = $("#admin-staff-list");
+  if (!list) return;
+  if (!staff.length) {
+    list.innerHTML = '<div class="empty-row">No active staff members.</div>';
+    return;
+  }
+  list.innerHTML = staff.map((person) => `
+    <div class="admin-staff-row" data-admin-staff-id="${escapeHtml(person.id)}">
+      <span><strong>${escapeHtml(person.name)}</strong><small>${escapeHtml(person.role || "Team member")}</small></span>
+      <button class="action remove" type="button" data-remove-staff>Remove</button>
+    </div>`).join("");
 }
 
 async function addStaff(event) {
@@ -254,108 +253,61 @@ async function addStaff(event) {
   const data = new FormData(form);
   const name = String(data.get("name") || "").trim();
   const role = String(data.get("role") || "").trim();
-  const email = cleanEmail(String(data.get("email") || ""));
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    showMessage(appMessage, "Enter a valid employee email address.", true);
-    return;
-  }
   const button = form.querySelector("button[type=submit]");
   button.disabled = true;
-  const { error } = await supabase.rpc("admin_add_employee", {
+  const { error } = await supabase.rpc("admin_add_staff", {
     p_name: name,
-    p_role: role || null,
-    p_email: email
+    p_role: role || null
   });
   button.disabled = false;
   if (error) {
-    showMessage(appMessage, error.message, true);
+    showMessage(adminMessage, error.message, true);
     return;
   }
   form.reset();
-  showMessage(appMessage, `${name} was added. They can now sign in with ${email}.`);
-  await loadData();
+  showMessage(adminMessage, `${name} was added to the clock.`);
+  await loadStaff();
 }
 
-async function linkStaffEmail(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const staffId = String(data.get("staff_id") || "");
-  const email = cleanEmail(String(data.get("email") || ""));
-  if (!staffId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    showMessage(appMessage, "Choose an employee and enter a valid email address.", true);
-    return;
-  }
-  const button = form.querySelector("button[type=submit]");
-  button.disabled = true;
-  const { error } = await supabase.rpc("admin_set_employee_email", {
-    p_staff_id: staffId,
-    p_email: email
-  });
-  button.disabled = false;
-  if (error) {
-    showMessage(appMessage, error.message, true);
-    return;
-  }
-  form.reset();
-  showMessage(appMessage, `Email login was set for ${staff.find((person) => person.id === staffId)?.name || "the employee"}.`);
-}
-
-async function handleStaffAction(event) {
-  const button = event.target.closest("button[data-action]");
+async function removeStaff(event) {
+  const button = event.target.closest("button[data-remove-staff]");
   if (!button) return;
-  const action = button.dataset.action;
-  const row = button.closest(".staff-row");
-  const name = row?.querySelector(".person-name")?.textContent || "this employee";
-  if (action === "remove") {
-    const person = staff.find((entry) => entry.name === name);
-    if (!person || profile?.role !== "admin") return;
-    if (!confirm(`Remove ${name} from the active staff list? Past shift events will remain for records.`)) return;
-    const { error } = await supabase.rpc("admin_deactivate_employee", { p_staff_id: person.id });
-    if (error) showMessage(appMessage, error.message, true);
-    else showMessage(appMessage, `${name} was removed from the active staff list.`);
-    await loadData();
+  const row = button.closest("[data-admin-staff-id]");
+  const person = staff.find((item) => item.id === row?.dataset.adminStaffId);
+  if (!person || !confirm(`Remove ${person.name} from the active staff list? Earlier attendance records will remain.`)) return;
+  button.disabled = true;
+  const { error } = await supabase.rpc("admin_deactivate_employee", { p_staff_id: person.id });
+  if (error) {
+    button.disabled = false;
+    showMessage(adminMessage, error.message, true);
     return;
   }
-  const mapping = { in: "sign_in", break_start: "break_start", break_end: "break_end", out: "sign_out" };
-  if (mapping[action]) await doClockAction(mapping[action]);
+  showMessage(adminMessage, `${person.name} was removed. Earlier attendance records remain.`);
+  await loadStaff();
 }
 
-async function signOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) showMessage(appMessage, error.message, true);
+async function adminSignOut() {
+  await supabase.auth.signOut();
+  showPublic("Admin signed out.");
 }
 
-function showLogin() {
-  profile = null;
-  currentUser = null;
-  staff = [];
-  activity = [];
-  dashboardView.classList.add("hidden");
-  loginView.classList.remove("hidden");
-  $("#sign-out").classList.add("hidden");
-  $("#admin-panel").classList.add("hidden");
-  $(".summary-grid").classList.remove("hidden");
-  document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("hidden"));
-  emailForm.classList.remove("hidden");
-  otpForm.classList.add("hidden");
-  $("#otp").value = "";
+function updateClock() {
+  const now = new Date();
+  $("#time-now").textContent = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit"
+  }).format(now);
+  $("#date-now").textContent = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney", weekday: "long", month: "long", day: "numeric"
+  }).format(now);
 }
 
-emailForm.addEventListener("submit", requestOtp);
-otpForm.addEventListener("submit", verifyOtp);
-$("#change-email").addEventListener("click", () => {
-  otpForm.classList.add("hidden");
-  emailForm.classList.remove("hidden");
-  showMessage(loginMessage, "");
-});
-$("#sign-out").addEventListener("click", signOut);
-$("#refresh").addEventListener("click", loadData);
+$("#admin-open").addEventListener("click", () => showAdminLogin());
+$("#admin-cancel").addEventListener("click", () => showPublic());
+$("#admin-login-form").addEventListener("submit", adminLogin);
+$("#admin-sign-out").addEventListener("click", adminSignOut);
+$("#staff-list").addEventListener("click", recordAction);
 $("#search").addEventListener("input", renderStaff);
-$("#staff-list").addEventListener("click", handleStaffAction);
+$("#load-report").addEventListener("click", loadReport);
+$("#report-date").addEventListener("change", () => showMessage(reportMessage, ""));
 $("#add-staff-form").addEventListener("submit", addStaff);
-$("#link-staff-form").addEventListener("submit", linkStaffEmail);
-
-setInterval(() => {
-  if (profile) loadData();
-}, 45_000);
+$("#admin-staff-list").addEventListener("click", removeStaff);
