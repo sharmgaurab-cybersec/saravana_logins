@@ -1,25 +1,31 @@
 # Saravanaa Bhavan Staff Clock
 
-A shared staff clock with no employee accounts. Staff choose their name to sign in, start/end breaks, and sign out. Only an administrator can sign in to view daily attendance details or manage the staff list.
+Shared staff clock, with no employee sign-in. Staff select their name for clock actions. Only the authorized admin email `reborngamming1@gmail.com` can access daily attendance reports and roster management after verifying a six-digit email code.
 
-## What changed
+## Preserve the existing Supabase connection
 
-- Staff clock actions no longer ask each employee to log in.
-- Public visitors can see only active staff names and roles; they cannot read attendance events or the daily report.
-- One administrator account uses email and password. This does not depend on Supabase sending OTP or magic-link emails.
-- The admin report shows each person's sign-in time, break starts, break ends, sign-out time, and total hours worked after subtracting breaks. Multiple breaks are listed. Times use Sydney time.
-- Existing staff and clock event records are retained by the migration.
+This ZIP does not contain `config.js`. Keep the existing `config.js` from your Saravanaa app; it contains the existing Supabase URL and publishable key. Do not replace those values or upload this package to the Retail Forecast project.
 
-## Keep your Supabase settings
+## Set up the admin email code
 
-This update ZIP intentionally does not include `config.js`. Keep the `config.js` already in your repository or Worker assets. It contains the existing Supabase project URL and publishable key. Do not delete or replace it.
+1. In Supabase, open **Authentication → Users**. Make sure `reborngamming1@gmail.com` already exists as a confirmed user. The app will not allow public sign-up.
+2. In **Authentication → Email Templates → Magic Link**, edit the message to include the OTP token. For example:
 
-## Update your existing Supabase project
+```html
+<h2>Saravanaa admin sign-in</h2>
+<p>Enter this verification code in the app: {{ .Token }}</p>
+```
+
+3. Confirm that email authentication is enabled and that Supabase can deliver to this address. Supabase’s built-in sender has recipient restrictions and rate limits; if this Gmail address is not an organization member or the built-in sender blocks it, you need a real SMTP provider or Auth email hook. Random SMTP details cannot send mail.
+4. After the migration below, promote this user's Auth UUID as the admin using the SQL snippet in the next section.
+
+The app uses Supabase's `signInWithOtp` with account creation disabled, then verifies the six-digit code. A magic-link-only template may send a link instead of the code field expected by the app.
+
+## Update your existing database
 
 1. Open the existing Saravanaa Supabase project and go to **SQL Editor**.
-2. Open `supabase/migrate_to_public_clock_admin.sql` from this ZIP, copy all its contents into a new SQL query, and run it once. It updates the permissions and RPC functions without dropping staff or attendance records.
-3. In **Authentication → Users**, create one administrator user with an email and password (or set a password for the existing admin account if the dashboard offers that option). If the dashboard offers an email-confirmation option, mark this administrator as confirmed. No SMTP setup is needed for password sign-in.
-4. Copy that user's UUID from the Users page. In SQL Editor run the following, replacing the placeholder:
+2. Run `supabase/migrate_to_public_clock_admin.sql` once. It retains current staff and clock records and changes the access rules so public users cannot read attendance events.
+3. In **Authentication → Users**, copy the UUID for `reborngamming1@gmail.com`. Run this in SQL Editor after replacing the placeholder:
 
 ```sql
 insert into public.user_profiles (user_id, role)
@@ -27,30 +33,31 @@ values ('YOUR_AUTH_USER_UUID'::uuid, 'admin')
 on conflict (user_id) do update set role = 'admin';
 ```
 
-5. Sign in to the app using that email and password. Confirm the admin screen shows the daily report and staff manager.
+For a completely new Supabase database, run `supabase/setup.sql` instead of the migration, then create/confirm the admin Auth user and add its UUID to `user_profiles` as above.
 
-For a completely new Supabase database, run `supabase/setup.sql` instead of the migration, then create/promote the admin user using steps 3–5.
-
-## Upload the app files
+## Upload the app
 
 1. Extract this ZIP.
-2. Replace the matching app files in the existing Saravanaa GitHub repository or the Saravanaa Cloudflare Worker upload.
-3. Keep your existing `config.js` in place. Do not change the Supabase URL or publishable key.
-4. Publish/redeploy the existing Saravanaa app and open its URL.
+2. Replace the matching app files in your existing Saravanaa GitHub repository or Cloudflare Worker static upload.
+3. Keep the existing `config.js` in the uploaded app folder. The app login button stays clickable, but authentication needs the correct project URL and publishable key in that file.
+4. Redeploy the existing Saravanaa app and open it.
+5. Click **Admin login**, request the code, check inbox/spam, enter the six-digit code, and choose **Verify code and sign in**.
 
-The ZIP includes static HTML, CSS, and JavaScript files. For Cloudflare's static asset upload page, upload the extracted app files while retaining the existing `config.js` in the upload folder. Do not upload this package to a different project such as Retail Forecast.
+## Admin dashboard
 
-## How the shared clock works
+- Search the daily report by typing a name or choosing a suggestion from staff already in the system.
+- Search existing names in the staff manager; add or deactivate roster entries there.
+- Select a date and load the report. Columns show employee, sign-in time, break starts, break ends, sign-out time, and total work hours excluding breaks.
+- Select **Download CSV** to save the daily report. Excel can open the CSV file.
+- Times are in Sydney time. An open shift is counted up to now for today, or to the end of the selected day for an earlier date.
 
-The staff clock deliberately allows anyone with access to the shared page to submit a clock action for a listed employee. Use it on a controlled staff tablet or internal network. Because there is no employee login or identity check, the clock cannot prove which person tapped a button. Attendance history and report data remain inaccessible through the public app; the admin report requires an authenticated account whose `user_profiles.role` is `admin`.
+## Shared-clock limitation
 
-## Report details
-
-The report date defaults to the current date in Sydney. It lists active staff, plus inactive staff who have attendance records for that date. A shift still in progress shows the hours accumulated so far. The calculation sums working intervals and excludes time between each break start and break end. It is an attendance summary, not payroll: it does not calculate overtime, pay rates, or award rules.
+The public clock intentionally lets a person with access to the page submit an action for a listed name. Since staff do not log in, it cannot verify who tapped the button. Use the clock on a controlled staff device. The public page can read active names and roles, but attendance history and the report require the admin session.
 
 ## Troubleshooting
 
-- **Admin sign-in fails:** confirm the Auth user has a password and that the exact user's UUID has `role = 'admin'` in `public.user_profiles`.
-- **Staff list will not load:** confirm the app still has the correct existing `config.js`, the SQL migration succeeded, and the public schema is enabled in Supabase's Data API settings.
-- **Clock action is rejected:** the action may not match the current shift state (for example, break end before break start). Ask the admin to check the report and correct the sequence.
-- **Report is blank or access denied:** sign in with the administrator account and confirm its profile role is `admin`.
+- **Admin login button does not open:** keep the package's current `index.html`, `styles.css`, and `src/app.js` together. The button is no longer disabled when settings are missing; the login screen will explain if `config.js` is not connected.
+- **Code is not sent:** confirm the `{{ .Token }}` template, email delivery settings, and Supabase Auth logs. If the built-in email service cannot deliver to this recipient, a working SMTP provider is required.
+- **Code verifies but access is denied:** confirm this email's Auth UUID has `role = 'admin'` in `public.user_profiles`.
+- **Staff list/report fails:** verify the existing `config.js` still points to the Saravanaa Supabase project and the database migration completed.

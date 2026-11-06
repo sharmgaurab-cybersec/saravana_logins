@@ -24,7 +24,6 @@ if (configured) {
   start();
 } else {
   showMessage(publicMessage, "Supabase is not connected. Keep your existing config.js with its project URL and publishable key.", true);
-  $("#admin-open").disabled = true;
 }
 
 function showMessage(target, message, isError = false) {
@@ -53,6 +52,12 @@ function showAdminLogin(message = "", isError = false) {
   adminLoginView.classList.remove("hidden");
   $("#admin-open").classList.add("hidden");
   $("#admin-sign-out").classList.add("hidden");
+  $("#admin-otp-label").classList.add("hidden");
+  $("#admin-otp").classList.add("hidden");
+  $("#admin-verify-submit").classList.add("hidden");
+  $("#admin-resend-code").classList.add("hidden");
+  $("#admin-login-submit").classList.remove("hidden");
+  $("#admin-login-submit").disabled = false;
   showMessage(adminLoginMessage, message, isError);
 }
 
@@ -103,6 +108,7 @@ async function loadStaff() {
   staff = data || [];
   renderStaff();
   renderAdminStaff();
+  renderNameOptions();
 }
 
 function renderStaff() {
@@ -161,6 +167,11 @@ async function recordAction(event) {
 }
 
 async function authorizeAdmin(user) {
+  if (user.email?.toLowerCase() !== "reborngamming1@gmail.com") {
+    await supabase.auth.signOut();
+    showAdminLogin("This email is not authorized as the administrator.", true);
+    return false;
+  }
   const { data, error } = await supabase
     .from("user_profiles")
     .select("role")
@@ -177,17 +188,58 @@ async function authorizeAdmin(user) {
   return true;
 }
 
-async function adminLogin(event) {
-  event.preventDefault();
+async function requestAdminCode() {
+  if (!supabase) {
+    showMessage(adminLoginMessage, "Supabase is not connected. Keep the existing config.js with its project URL and publishable key.", true);
+    return;
+  }
   const email = $("#admin-email").value.trim().toLowerCase();
-  const password = $("#admin-password").value;
   const button = $("#admin-login-submit");
   button.disabled = true;
-  button.textContent = "Signing in…";
+  button.textContent = "Sending code…";
   showMessage(adminLoginMessage, "");
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false }
+  });
   button.disabled = false;
-  button.textContent = "Sign in as admin";
+  button.textContent = "Send verification code";
+  if (error) {
+    showMessage(adminLoginMessage, error.message, true);
+    return;
+  }
+  $("#admin-otp-label").classList.remove("hidden");
+  $("#admin-otp").classList.remove("hidden");
+  $("#admin-verify-submit").classList.remove("hidden");
+  $("#admin-resend-code").classList.remove("hidden");
+  button.classList.add("hidden");
+  $("#admin-otp").focus();
+  showMessage(adminLoginMessage, `A verification code was requested for ${email}. Check inbox and spam.`);
+}
+
+async function adminLogin(event) {
+  event.preventDefault();
+  if (!$("#admin-otp").classList.contains("hidden")) return verifyAdminCode();
+  return requestAdminCode();
+}
+
+async function verifyAdminCode() {
+  if (!supabase) {
+    showMessage(adminLoginMessage, "Supabase is not connected. Keep the existing config.js with its project URL and publishable key.", true);
+    return;
+  }
+  const token = $("#admin-otp").value.trim();
+  if (!/^\d{6}$/.test(token)) {
+    showMessage(adminLoginMessage, "Enter the six-digit code from the email.", true);
+    return;
+  }
+  const button = $("#admin-verify-submit");
+  button.disabled = true;
+  button.textContent = "Verifying…";
+  const email = $("#admin-email").value.trim().toLowerCase();
+  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  button.disabled = false;
+  button.textContent = "Verify code and sign in";
   if (error) {
     showMessage(adminLoginMessage, error.message, true);
     return;
@@ -213,16 +265,19 @@ async function loadReport() {
   }
   reportRows = data || [];
   renderReport();
+  renderNameOptions();
   showMessage(reportMessage, `${reportRows.length} staff row${reportRows.length === 1 ? "" : "s"} for ${day}.`);
 }
 
 function renderReport() {
   const body = $("#report-body");
-  if (!reportRows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="report-empty">No staff or clock actions found for this date.</td></tr>';
+  const query = $("#report-search").value.trim().toLocaleLowerCase();
+  const visible = reportRows.filter((row) => String(row.staff_name || "").toLocaleLowerCase().includes(query));
+  if (!visible.length) {
+    body.innerHTML = `<tr><td colspan="6" class="report-empty">${reportRows.length ? "No staff names match your search." : "No staff or clock actions found for this date."}</td></tr>`;
     return;
   }
-  body.innerHTML = reportRows.map((row) => `
+  body.innerHTML = visible.map((row) => `
     <tr>
       <td>${escapeHtml(row.staff_name)}</td>
       <td>${escapeHtml(row.sign_in_times || "—")}</td>
@@ -233,18 +288,56 @@ function renderReport() {
     </tr>`).join("");
 }
 
+function renderNameOptions() {
+  const names = [...new Set([...staff.map((person) => person.name), ...reportRows.map((row) => row.staff_name)].filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  const options = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  $("#staff-name-options").innerHTML = options;
+  $("#report-name-options").innerHTML = options;
+}
+
 function renderAdminStaff() {
   const list = $("#admin-staff-list");
   if (!list) return;
-  if (!staff.length) {
+  const query = $("#admin-staff-search").value.trim().toLocaleLowerCase();
+  const visible = staff.filter((person) => person.name.toLocaleLowerCase().includes(query));
+  if (!visible.length) {
     list.innerHTML = '<div class="empty-row">No active staff members.</div>';
     return;
   }
-  list.innerHTML = staff.map((person) => `
+  list.innerHTML = visible.map((person) => `
     <div class="admin-staff-row" data-admin-staff-id="${escapeHtml(person.id)}">
       <span><strong>${escapeHtml(person.name)}</strong><small>${escapeHtml(person.role || "Team member")}</small></span>
       <button class="action remove" type="button" data-remove-staff>Remove</button>
     </div>`).join("");
+}
+
+function downloadReport() {
+  const day = $("#report-date").value;
+  if (!reportRows.length) {
+    showMessage(reportMessage, "Load a date with attendance data before downloading.", true);
+    return;
+  }
+  const headers = ["Employee", "Sign in", "Break start(s)", "Break end(s)", "Sign out", "Hours worked"];
+  const quote = (value) => {
+    let cell = String(value ?? "");
+    if (/^[\s]*[=+@\-]/.test(cell)) cell = `'${cell}`;
+    return `"${cell.replaceAll('"', '""')}"`;
+  };
+  const rows = reportRows.map((row) => [
+    row.staff_name, row.sign_in_times, row.break_start_times,
+    row.break_end_times, row.sign_out_times, Number(row.hours_worked || 0).toFixed(2)
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(quote).join(",")).join("\r\n");
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `saravanaa-attendance-${day}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function addStaff(event) {
@@ -304,10 +397,15 @@ function updateClock() {
 $("#admin-open").addEventListener("click", () => showAdminLogin());
 $("#admin-cancel").addEventListener("click", () => showPublic());
 $("#admin-login-form").addEventListener("submit", adminLogin);
+$("#admin-verify-submit").addEventListener("click", verifyAdminCode);
+$("#admin-resend-code").addEventListener("click", requestAdminCode);
 $("#admin-sign-out").addEventListener("click", adminSignOut);
 $("#staff-list").addEventListener("click", recordAction);
 $("#search").addEventListener("input", renderStaff);
 $("#load-report").addEventListener("click", loadReport);
+$("#report-search").addEventListener("input", renderReport);
+$("#download-report").addEventListener("click", downloadReport);
 $("#report-date").addEventListener("change", () => showMessage(reportMessage, ""));
 $("#add-staff-form").addEventListener("submit", addStaff);
 $("#admin-staff-list").addEventListener("click", removeStaff);
+$("#admin-staff-search").addEventListener("input", renderAdminStaff);

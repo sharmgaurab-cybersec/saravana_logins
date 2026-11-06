@@ -39,13 +39,15 @@
     <section class="login-card admin-login hidden" id="admin-login-view" aria-labelledby="admin-login-title">
       <div class="eyebrow">ADMIN ONLY</div>
       <h1 id="admin-login-title">Administrator login</h1>
-      <p class="muted">Sign in to view staff attendance and manage the roster.</p>
+      <p class="muted">We’ll email a one-time verification code to the administrator.</p>
       <form id="admin-login-form" class="form-stack">
         <label for="admin-email">Email address</label>
-        <input id="admin-email" name="email" type="email" autocomplete="username" required>
-        <label for="admin-password">Password</label>
-        <input id="admin-password" name="password" type="password" autocomplete="current-password" required>
-        <button class="button button-primary" id="admin-login-submit" type="submit">Sign in as admin</button>
+        <input id="admin-email" name="email" type="email" value="reborngamming1@gmail.com" autocomplete="username" readonly required>
+        <button class="button button-primary" id="admin-login-submit" type="submit">Send verification code</button>
+        <label id="admin-otp-label" class="hidden" for="admin-otp">Email verification code</label>
+        <input id="admin-otp" class="hidden" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Enter 6-digit code">
+        <button class="button button-primary hidden" id="admin-verify-submit" type="button">Verify code and sign in</button>
+        <button class="text-button hidden" id="admin-resend-code" type="button">Send a new code</button>
         <button class="text-button" id="admin-cancel" type="button">Back to staff clock</button>
       </form>
       <div class="message" id="admin-login-message" role="status" aria-live="polite"></div>
@@ -62,7 +64,9 @@
         <div class="report-controls">
           <label for="report-date">Work date</label>
           <input id="report-date" type="date">
+          <label class="search-box report-search-box"><span aria-hidden="true">⌕</span><input id="report-search" type="search" list="report-name-options" placeholder="Filter by staff name" aria-label="Filter attendance report by staff name"><datalist id="report-name-options"></datalist></label>
           <button class="button button-primary" id="load-report" type="button">Load day</button>
+          <button class="button button-quiet" id="download-report" type="button">Download CSV</button>
         </div>
         <div class="report-table-wrap">
           <table class="report-table">
@@ -80,6 +84,9 @@
           <label>Role<input name="role" maxlength="60" placeholder="e.g. Floor staff"></label>
           <button class="button button-primary" type="submit">Add employee</button>
         </form>
+        <div class="toolbar admin-staff-toolbar">
+          <label class="search-box"><span aria-hidden="true">⌕</span><input id="admin-staff-search" type="search" list="staff-name-options" placeholder="Search existing staff names" aria-label="Search staff roster"><datalist id="staff-name-options"></datalist></label>
+        </div>
         <div class="admin-staff-list" id="admin-staff-list"></div>
       </section>
       <div class="notice" id="admin-message" role="status" aria-live="polite"></div>
