@@ -73,6 +73,7 @@ drop policy if exists "Public can view active roster" on public.staff_members;
 create policy "Public can view active roster" on public.staff_members
   for select to anon, authenticated using (is_active);
 
+drop policy if exists "Admins manage private staff contacts" on public.staff_contacts;
 drop policy if exists "admins manage private staff contacts" on public.staff_contacts;
 create policy "Admins manage private staff contacts" on public.staff_contacts
   for all to authenticated using (private.is_admin()) with check (private.is_admin());
@@ -89,12 +90,23 @@ revoke all on public.staff_members, public.staff_contacts, public.user_profiles,
 grant select (id, name, role, is_active) on public.staff_members to anon, authenticated;
 grant select (user_id, role, staff_id) on public.user_profiles to authenticated;
 
+create or replace function public.get_public_clock_status(p_staff_id uuid)
+returns text language sql stable security definer set search_path = '' as $$
+  select s.clock_status from public.staff_members s
+  where s.id = p_staff_id and s.is_active = true;
+$$;
+revoke all on function public.get_public_clock_status(uuid) from public;
+grant execute on function public.get_public_clock_status(uuid) to anon, authenticated;
+
 create or replace function public.record_staff_clock_action(p_staff_id uuid, p_action text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_name text;
   v_current text;
   v_next text;
+  v_event_time timestamptz := clock_timestamp();
+  v_shift_start timestamptz;
+  v_hours_worked numeric := null;
 begin
   if p_action not in ('sign_in', 'break_start', 'break_end', 'sign_out') then
     raise exception 'Unknown clock action';
@@ -110,10 +122,32 @@ begin
   else raise exception 'That action is not available from the current shift status';
   end if;
 
-  update public.staff_members set clock_status = v_next, status_changed_at = now() where id = p_staff_id;
-  insert into public.shift_events (staff_id, staff_name, user_id, action)
-    values (p_staff_id, v_name, (select auth.uid()), p_action);
-  return jsonb_build_object('staff_id', p_staff_id, 'status', v_next, 'action', p_action);
+  update public.staff_members set clock_status = v_next, status_changed_at = v_event_time where id = p_staff_id;
+  insert into public.shift_events (staff_id, staff_name, user_id, action, created_at)
+    values (p_staff_id, v_name, (select auth.uid()), p_action, v_event_time);
+
+  if p_action = 'sign_out' then
+    select max(e.created_at) into v_shift_start
+    from public.shift_events e
+    where e.staff_id = p_staff_id and e.action = 'sign_in' and e.created_at <= v_event_time;
+
+    with ordered_shift_events as (
+      select e.action, e.created_at,
+        lead(e.action) over (order by e.created_at, e.id) as next_action,
+        lead(e.created_at) over (order by e.created_at, e.id) as next_at
+      from public.shift_events e
+      where e.staff_id = p_staff_id and e.created_at >= v_shift_start and e.created_at <= v_event_time
+    )
+    select round(coalesce(sum(extract(epoch from (o.next_at - o.created_at))), 0)::numeric / 3600, 2)
+      into v_hours_worked
+    from ordered_shift_events o
+    where o.action in ('sign_in', 'break_end') and o.next_action in ('break_start', 'sign_out');
+  end if;
+
+  return jsonb_build_object(
+    'staff_id', p_staff_id, 'status', v_next, 'action', p_action,
+    'hours_worked', v_hours_worked
+  );
 end;
 $$;
 revoke all on function public.record_staff_clock_action(uuid, text) from public;
@@ -178,13 +212,13 @@ begin
       lead(de.created_at) over (partition by de.staff_id order by de.created_at, de.id) as next_at
     from day_events de
   ), punches as (
-    select staff_id,
-      string_agg(to_char(created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by created_at, id) filter (where action = 'sign_in') as sign_ins,
-      string_agg(to_char(created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by created_at, id) filter (where action = 'break_start') as break_starts,
-      string_agg(to_char(created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by created_at, id) filter (where action = 'break_end') as break_ends,
-      string_agg(to_char(created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by created_at, id) filter (where action = 'sign_out') as sign_outs,
-      max(staff_name) as event_staff_name
-    from day_events group by staff_id
+    select de.staff_id,
+      string_agg(to_char(de.created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by de.created_at, de.id) filter (where de.action = 'sign_in') as sign_ins,
+      string_agg(to_char(de.created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by de.created_at, de.id) filter (where de.action = 'break_start') as break_starts,
+      string_agg(to_char(de.created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by de.created_at, de.id) filter (where de.action = 'break_end') as break_ends,
+      string_agg(to_char(de.created_at at time zone 'Australia/Sydney', 'HH12:MI AM'), ', ' order by de.created_at, de.id) filter (where de.action = 'sign_out') as sign_outs,
+      max(de.staff_name) as event_staff_name
+    from day_events de group by de.staff_id
   ), durations as (
     select o.staff_id,
       sum(extract(epoch from (coalesce(o.next_at, least(now(), (select ends_at from bounds))) - o.created_at))) / 3600.0 as hours

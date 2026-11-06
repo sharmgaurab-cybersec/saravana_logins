@@ -25,7 +25,7 @@ If the profile role query runs successfully but matches no Auth user, first crea
 
 ## Update your existing database
 
-If you have not yet run the migration for the shared clock, open the existing Saravanaa Supabase project's **SQL Editor**, paste all of `supabase/migrate_to_public_clock_admin.sql`, and run it once. It preserves current staff and attendance events. Do not run `setup.sql` on an existing project. For a brand new database, run `setup.sql` instead.
+For this updated version, run the complete `supabase/migrate_to_public_clock_admin.sql` in the existing Saravanaa Supabase project's **SQL Editor**. It fixes the report query and adds a limited RPC for current clock status and completed-shift hours. It is safe to rerun and preserves staff and attendance events. Do not run `setup.sql` on an existing project. For a brand new database, run `setup.sql` instead.
 
 ## Upload the app
 
@@ -44,6 +44,8 @@ If you have not yet run the migration for the shared clock, open the existing Sa
 - Times are shown in Sydney time. An open shift counts up to now for today, or to the end of the selected day for an earlier date.
 
 ## Shared-clock limitation
+
+Staff can search the roster, filter by clock status, refresh statuses on demand, and see the current state beside each name. Statuses also refresh automatically every 30 seconds.
 
 The public clock intentionally lets a person with access to the page submit an action for a listed name. Since staff do not log in, it cannot verify who tapped the button. Use it on a controlled staff device. The public page can read active names and roles, but attendance history and the report require the authorized admin session.
 

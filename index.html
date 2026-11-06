@@ -32,6 +32,13 @@
       <div class="toolbar">
         <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search employee name" aria-label="Search employee name"></label>
       </div>
+      <div class="staff-filters" role="group" aria-label="Filter staff by clock status">
+        <button class="filter-chip active" type="button" data-status-filter="all" aria-pressed="true">Everyone</button>
+        <button class="filter-chip" type="button" data-status-filter="off" aria-pressed="false">Not clocked in</button>
+        <button class="filter-chip" type="button" data-status-filter="working" aria-pressed="false">Working</button>
+        <button class="filter-chip" type="button" data-status-filter="break" aria-pressed="false">On break</button>
+        <button class="button button-quiet refresh-staff" id="refresh-staff" type="button">↻ Refresh</button>
+      </div>
       <div class="staff-list public-staff-list" id="staff-list" aria-live="polite"></div>
       <div class="message" id="public-message" role="status" aria-live="polite"></div>
     </section>

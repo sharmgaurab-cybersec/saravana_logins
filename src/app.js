@@ -15,6 +15,8 @@ const adminMessage = $("#admin-message");
 const reportMessage = $("#report-message");
 let supabase;
 let staff = [];
+let staffStatuses = new Map();
+let staffStatusFilter = "all";
 let reportRows = [];
 
 if (configured) {
@@ -80,6 +82,7 @@ async function start() {
   if (session?.user) await authorizeAdmin(session.user);
   else showPublic();
   await loadStaff();
+  setInterval(refreshStaffStatuses, 30_000);
 }
 
 function sydneyDate() {
@@ -101,6 +104,13 @@ async function loadStaff() {
     return;
   }
   staff = data || [];
+  const statusEntries = await Promise.all(staff.map(async (person) => {
+    const { data: status, error: statusError } = await supabase.rpc("get_public_clock_status", {
+      p_staff_id: person.id
+    });
+    return [person.id, statusError ? null : status];
+  }));
+  staffStatuses = new Map(statusEntries);
   renderStaff();
   renderAdminStaff();
   renderNameOptions();
@@ -108,25 +118,32 @@ async function loadStaff() {
 
 function renderStaff() {
   const query = $("#search").value.trim().toLocaleLowerCase();
-  const visible = staff.filter((person) => person.name.toLocaleLowerCase().includes(query));
+  const visible = staff.filter((person) => person.name.toLocaleLowerCase().includes(query) &&
+    (staffStatusFilter === "all" || staffStatuses.get(person.id) === staffStatusFilter));
   const list = $("#staff-list");
   if (!visible.length) {
     list.innerHTML = `<div class="empty-row">${staff.length ? "No names match your search." : "No active staff members yet. Ask the administrator to add the team."}</div>`;
     return;
   }
-  list.innerHTML = visible.map((person) => `
-    <article class="staff-row public-staff-row" data-staff-id="${escapeHtml(person.id)}">
-      <div class="person">
-        <div class="avatar" aria-hidden="true">${escapeHtml(initials(person.name))}</div>
-        <div><div class="person-name">${escapeHtml(person.name)}</div><div class="person-role">${escapeHtml(person.role || "Team member")}</div></div>
-      </div>
-      <div class="clock-actions">
-        ${actionButton("sign_in", "Sign in", "primary")}
-        ${actionButton("break_start", "Start break", "warm")}
-        ${actionButton("break_end", "End break", "quiet")}
-        ${actionButton("sign_out", "Sign out", "remove")}
-      </div>
-    </article>`).join("");
+  list.innerHTML = visible.map((person) => {
+    const status = staffStatuses.get(person.id);
+    const actions = status === "off"
+      ? actionButton("sign_in", "Sign in", "primary")
+      : status === "working"
+        ? `${actionButton("break_start", "Start break", "warm")}${actionButton("sign_out", "Sign out", "remove")}`
+        : status === "break"
+          ? actionButton("break_end", "End break", "quiet")
+          : '<span class="person-role">Clock status unavailable. Refresh the page.</span>';
+    return `
+      <article class="staff-row public-staff-row" data-staff-id="${escapeHtml(person.id)}">
+        <div class="person">
+          <div class="avatar" aria-hidden="true">${escapeHtml(initials(person.name))}</div>
+          <div><div class="person-name">${escapeHtml(person.name)}</div><div class="person-role">${escapeHtml(person.role || "Team member")}</div></div>
+        </div>
+        <div class="clock-state status-${escapeHtml(status || "unknown")}"><span class="status-dot" aria-hidden="true"></span>${status === "off" ? "Not clocked in" : status === "working" ? "Working" : status === "break" ? "On break" : "Status unavailable"}</div>
+        <div class="clock-actions">${actions}</div>
+      </article>`;
+  }).join("");
 }
 
 function actionButton(action, label, style) {
@@ -149,16 +166,37 @@ async function recordAction(event) {
   const person = staff.find((item) => item.id === staffId);
   if (!person) return;
   row.querySelectorAll("button").forEach((item) => { item.disabled = true; });
-  const { error } = await supabase.rpc("record_staff_clock_action", {
+  const action = button.dataset.action;
+  const { data, error } = await supabase.rpc("record_staff_clock_action", {
     p_staff_id: staffId,
-    p_action: button.dataset.action
+    p_action: action
   });
-  row.querySelectorAll("button").forEach((item) => { item.disabled = false; });
   if (error) {
+    row.querySelectorAll("button").forEach((item) => { item.disabled = false; });
+    const { data: freshStatus } = await supabase.rpc("get_public_clock_status", { p_staff_id: staffId });
+    if (freshStatus) staffStatuses.set(staffId, freshStatus);
+    renderStaff();
     showMessage(publicMessage, "That clock action could not be recorded. Check the current shift with the administrator.", true);
     return;
   }
-  showMessage(publicMessage, `${person.name}: ${actionLabel(button.dataset.action)} recorded.`);
+  staffStatuses.set(staffId, data.status);
+  renderStaff();
+  if (action === "sign_out") {
+    const hours = Number(data.hours_worked || 0).toFixed(2);
+    showMessage(publicMessage, `Congratulations, ${person.name}! Your shift is complete. You worked ${hours} hours, excluding breaks.`);
+  } else {
+    showMessage(publicMessage, `${person.name}: ${actionLabel(action)} recorded.`);
+  }
+}
+
+async function refreshStaffStatuses() {
+  if (!staff.length) return;
+  const results = await Promise.all(staff.map(async (person) => {
+    const { data, error } = await supabase.rpc("get_public_clock_status", { p_staff_id: person.id });
+    return [person.id, error ? null : data];
+  }));
+  staffStatuses = new Map(results);
+  renderStaff();
 }
 
 async function authorizeAdmin(user) {
@@ -358,6 +396,26 @@ $("#admin-login-form").addEventListener("submit", adminLogin);
 $("#admin-sign-out").addEventListener("click", adminSignOut);
 $("#staff-list").addEventListener("click", recordAction);
 $("#search").addEventListener("input", renderStaff);
+$(".staff-filters").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-status-filter]");
+  if (!button) return;
+  staffStatusFilter = button.dataset.statusFilter;
+  $(".staff-filters").querySelectorAll("[data-status-filter]").forEach((item) => {
+    const active = item === button;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-pressed", String(active));
+  });
+  renderStaff();
+});
+$("#refresh-staff").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.classList.add("spinning");
+  await refreshStaffStatuses();
+  button.disabled = false;
+  button.classList.remove("spinning");
+  showMessage(publicMessage, "Staff clock statuses refreshed.");
+});
 $("#load-report").addEventListener("click", loadReport);
 $("#report-search").addEventListener("input", renderReport);
 $("#download-report").addEventListener("click", downloadReport);
